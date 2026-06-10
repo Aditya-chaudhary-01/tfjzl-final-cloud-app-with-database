@@ -101,3 +101,42 @@ class Enrollment(models.Model):
 #class Submission(models.Model):
 #    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE)
 #    choices = models.ManyToManyField(Choice)
+
+class Question(models.Model):
+    # Each question belongs to one course
+    course = models.ForeignKey(Course, on_delete=models.CASCADE)
+    # The text of the question
+    question_text = models.CharField(max_length=200)
+    # Marks/grade for this question
+    grade = models.FloatField(default=50.0)
+
+    def is_get_score(self, selected_ids):
+        # Returns True only if ALL correct choices were selected
+        # and no incorrect ones were selected
+        all_correct = self.choice_set.filter(is_correct=True)
+        return set(all_correct.values_list('id', flat=True)) == set(selected_ids)
+
+    def __str__(self):
+        return self.question_text
+
+
+class Choice(models.Model):
+    # Each choice belongs to one question
+    question = models.ForeignKey(Question, on_delete=models.CASCADE)
+    # The text of the choice
+    choice_text = models.CharField(max_length=200)
+    # Is this the correct answer?
+    is_correct = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.choice_text
+
+
+class Submission(models.Model):
+    # Links back to which enrollment (who took the exam, for which course)
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE)
+    # Which choices did the learner pick? Many-to-many since many answers possible
+    choices = models.ManyToManyField(Choice)
+
+    def __str__(self):
+        return f"Submission by {self.enrollment.user} for {self.enrollment.course}"
