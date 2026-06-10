@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 # <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Submission, Choice, Question
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -134,3 +134,84 @@ def extract_answers(request):
 
 
 
+def submit(request, course_id):
+    # Get the current logged-in user
+    user = request.user
+    
+    # Get the course object from the database using the course_id from the URL
+    course = get_object_or_404(Course, pk=course_id)
+    
+    # Find this user's enrollment for this course
+    # We need enrollment because Submission links to Enrollment, not directly to User
+    enrollment = Enrollment.objects.get(user=user, course=course)
+    
+    # Create a new Submission object linked to this enrollment
+    submission = Submission(enrollment=enrollment)
+    submission.save()
+    
+    # Get all the choice IDs the user checked from the form
+    # request.POST.getlist('choice') returns a list like ['3', '7']
+    # because HTML forms send everything as strings
+    submitted_choice_ids = request.POST.getlist('choice')
+    
+    # Loop through each selected choice ID
+    for choice_id in submitted_choice_ids:
+        # Get the actual Choice object from the database
+        choice = Choice.objects.get(pk=choice_id)
+        # Add it to the submission's choices (ManyToMany relationship)
+        submission.choices.add(choice)
+    
+    # Save the submission again now that choices are added
+    submission.save()
+    
+    # Redirect to the result page, passing both course_id and submission_id in the URL
+    return HttpResponseRedirect(
+        reverse('onlinecourse:show_exam_result', args=(course_id, submission.id))
+    )
+
+
+def show_exam_result(request, course_id, submission_id):
+    # Get the course and submission objects
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(Submission, pk=submission_id)
+    
+    # Get all the choice IDs from this submission
+    # values_list('id', flat=True) gives us a flat list of IDs like [3, 7]
+    selected_ids = submission.choices.values_list('id', flat=True)
+    
+    # Get all questions for this course
+    questions = course.question_set.all()
+    
+    # Calculate total score
+    total_score = 0
+    
+    # For each question, check if the user got it right using our is_get_score method
+    # We also need to pass per-question results to the template
+    # So we build a list of result dicts
+    question_results = []
+    
+    for question in questions:
+        # Get only the choices the user selected FOR THIS question
+        # i.e. filter selected_ids to only choices belonging to this question
+        selected_for_question = submission.choices.filter(
+            question=question
+        ).values_list('id', flat=True)
+        
+        # Use the is_get_score method we wrote in models.py
+        correct = question.is_get_score(selected_for_question)
+        
+        if correct:
+            total_score += question.grade
+        
+        question_results.append({
+            'question': question,
+            'correct': correct,
+            'selected_ids': selected_ids,
+        })
+    
+    # Pass everything to the template
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', {
+        'course': course,
+        'question_results': question_results,
+        'total_score': total_score,
+    })
